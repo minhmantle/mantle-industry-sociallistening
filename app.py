@@ -18,38 +18,39 @@ def fetch_data(token, max_items):
     }
     
     try:
-        # Start the run
         resp = requests.post(url, headers=headers, json=payload, timeout=60)
         resp.raise_for_status()
         run_id = resp.json()["data"]["id"]
-        st.info(f"✅ Run started: {run_id}. Đang chờ Apify scrape...")
+        st.info(f"Run started: {run_id} - Đang chờ Apify scrape (20-60s)...")
 
-        # Poll until run is finished
+        # Poll status
         status_url = f"https://api.apify.com/v2/acts/apidojo~tweet-scraper/runs/{run_id}"
-        for i in range(30):  # max 60 giây
+        for attempt in range(40):  # chờ tối đa ~80 giây
             time.sleep(2)
             status_resp = requests.get(status_url, headers=headers)
-            status_data = status_resp.json()["data"]
-            status = status_data.get("status")
+            if status_resp.status_code != 200:
+                continue
+            status = status_resp.json()["data"].get("status")
+            st.info(f"Status: {status} (lần {attempt+1})")
             
             if status == "SUCCEEDED":
                 st.success("✅ Scrape hoàn tất!")
                 break
             elif status in ["FAILED", "ABORTED", "TIMED_OUT"]:
-                st.error(f"❌ Run failed với status: {status}")
+                st.error(f"Run thất bại: {status}")
                 return None
         else:
-            st.warning("⏳ Timeout, thử lại sau.")
+            st.error("Timeout chờ quá lâu. Thử lại sau.")
             return None
 
-        # Get dataset
+        # Lấy dataset
         dataset_url = f"https://api.apify.com/v2/acts/apidojo~tweet-scraper/runs/{run_id}/dataset/items"
         data_resp = requests.get(dataset_url, headers=headers, timeout=60)
         data_resp.raise_for_status()
         items = data_resp.json()
-        
+
         if not items:
-            st.warning("Không có dữ liệu tweets nào. Thử tăng maxItems hoặc kiểm tra lại.")
+            st.warning("Không có data. Thử maxItems cao hơn.")
             return None
 
         profile = items[0].get("user", {}) if items else {}
@@ -72,35 +73,33 @@ def fetch_data(token, max_items):
         return {"profile": profile, "tweets": tweets}
         
     except Exception as e:
-        st.error(f"❌ Lỗi: {str(e)}")
+        st.error(f"Lỗi: {str(e)}")
         return None
 
 # Sidebar
 with st.sidebar:
     st.header("🔑 Apify Config")
     apify_token = st.text_input("Apify API Token", type="password")
-    max_items = st.slider("Số posts gần nhất", 10, 50, 20)
+    max_items = st.slider("Số posts", 10, 50, 20)
     
     if st.button("🔄 Fetch Fresh Data (@Mantle_Official)", type="primary", use_container_width=True):
         if apify_token:
-            with st.spinner("Đang scrape... (có thể mất 20-60 giây)"):
+            with st.spinner("Đang chạy scraper..."):
                 result = fetch_data(apify_token, max_items)
                 if result and result.get('tweets'):
                     st.session_state.user = result['profile']
                     st.session_state.df = pd.DataFrame(result['tweets'])
-                    st.success(f"✅ Lấy thành công {len(result['tweets'])} posts!")
+                    st.success(f"✅ Thành công! {len(result['tweets'])} posts")
         else:
-            st.error("Nhập Apify Token trước")
+            st.error("Nhập token trước")
 
-# Main UI
+# Main
 if "df" in st.session_state:
     df = st.session_state.df
     user = st.session_state.get("user", {})
-    
     c1, c2, c3 = st.columns(3)
     c1.metric("Followers", f"{user.get('followers', 'N/A'):,}")
     c2.metric("Posts", len(df))
-    
     total_eng = (df['likes'] + df['retweets'] + df['replies'] + df['quotes']).sum()
     total_imp = df['impressions'].sum() or 1
     c3.metric("Avg ER", f"{(total_eng / total_imp * 100):.2f}%")
@@ -112,6 +111,6 @@ if "df" in st.session_state:
         fig = px.bar(df, x="created_at", y="impressions", title="Impressions theo Post")
         st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info("👈 Nhập Token và bấm Fetch")
+    st.info("Nhập Token → Bấm Fetch")
 
-st.caption("Mantle Squad Live Dashboard")
+st.caption("Mantle Squad Dashboard")
