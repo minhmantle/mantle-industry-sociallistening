@@ -2,28 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import requests
-from datetime import datetime
 
 st.set_page_config(page_title="Mantle X Dashboard", layout="wide")
 st.title("📊 Mantle Network X Social Dashboard")
-st.caption("Auto via Apify • Mantle Squad Live Dashboard")
+st.caption("Auto via Apify • Live cho Mantle Squad")
 
-with st.sidebar:
-    st.header("🔑 Apify Config")
-    apify_token = st.text_input("Apify API Token", type="password", help="Lấy tại console.apify.com → Integrations")
-    max_items = st.slider("Số posts gần nhất", 10, 50, 20)
-    
-    if st.button("🔄 Fetch Fresh Data", type="primary", use_container_width=True):
-        if apify_token:
-            with st.spinner("Đang scrape @Mantle_Official từ Apify..."):
-                result = fetch_data(apify_token, max_items)
-                if result:
-                    st.session_state.user = result['profile']
-                    st.session_state.df = pd.DataFrame(result['tweets'])
-                    st.success("✅ Cập nhật thành công!")
-        else:
-            st.error("Nhập Apify Token trước")
-
+# ====================== HÀM FETCH DATA ======================
 def fetch_data(token, max_items):
     url = "https://api.apify.com/v2/acts/apidojo~tweet-scraper/runs"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -47,8 +31,8 @@ def fetch_data(token, max_items):
             if "text" not in t: continue
             m = t.get("publicMetrics", {})
             tweets.append({
-                "created_at": t.get("createdAt"),
-                "text": t.get("text", "")[:180] + ("..." if len(t.get("text","")) > 180 else ""),
+                "created_at": t.get("createdAt")[:16] if t.get("createdAt") else "",
+                "text": (t.get("text", "")[:160] + "...") if len(t.get("text", "")) > 160 else t.get("text", ""),
                 "impressions": m.get("impressionCount", 0),
                 "likes": m.get("likeCount", 0),
                 "retweets": m.get("retweetCount", 0),
@@ -58,29 +42,49 @@ def fetch_data(token, max_items):
             })
         return {"profile": profile, "tweets": tweets}
     except Exception as e:
-        st.error(f"Lỗi: {str(e)}")
+        st.error(f"Lỗi kết nối Apify: {str(e)}")
         return None
 
-# Hiển thị dữ liệu
+# ====================== SIDEBAR ======================
+with st.sidebar:
+    st.header("🔑 Apify Config")
+    apify_token = st.text_input("Apify API Token", type="password", help="Lấy ở console.apify.com → Integrations")
+    max_items = st.slider("Số posts gần nhất", 10, 50, 25)
+    
+    if st.button("🔄 Fetch Fresh Data (@Mantle_Official)", type="primary", use_container_width=True):
+        if apify_token:
+            with st.spinner("Đang scrape dữ liệu..."):
+                result = fetch_data(apify_token, max_items)
+                if result:
+                    st.session_state.user = result['profile']
+                    st.session_state.df = pd.DataFrame(result['tweets'])
+                    st.success("✅ Cập nhật dữ liệu thành công!")
+        else:
+            st.error("Vui lòng nhập Apify Token")
+
+# ====================== MAIN CONTENT ======================
 if "df" in st.session_state:
     df = st.session_state.df
     user = st.session_state.user
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Followers", f"{user.get('followers', 'N/A'):,}")
-    col2.metric("Posts in view", len(df))
-    col3.metric("Avg ER", f"{(df['likes']+df['retweets']+df['replies']+df['quotes']).sum() / df['impressions'].sum() * 100 if df['impressions'].sum() > 0 else 0 :.2f}%")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Followers", f"{user.get('followers', 'N/A'):,}")
+    c2.metric("Posts", len(df))
     
-    tab1, tab2 = st.tabs(["📋 Posts Table", "📈 Charts"])
+    total_eng = (df['likes'] + df['retweets'] + df['replies'] + df['quotes']).sum()
+    total_imp = df['impressions'].sum() or 1
+    c3.metric("Avg ER", f"{(total_eng / total_imp * 100):.2f}%")
+    
+    tab1, tab2 = st.tabs(["📋 Bảng Posts", "📈 Biểu đồ"])
     
     with tab1:
         st.dataframe(df, use_container_width=True, hide_index=True)
     
     with tab2:
-        fig = px.bar(df, x="created_at", y="impressions", title="Impressions per Post")
+        fig = px.bar(df, x="created_at", y="impressions", title="Impressions theo Post")
         st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("👈 Nhập Apify Token bên trái và bấm Fetch Fresh Data")
+    st.info("👈 Nhập Apify Token bên trái và bấm **Fetch Fresh Data** để bắt đầu")
 
-st.caption("Live Dashboard cho Mantle Squad • Dùng chung thoải mái")
+st.caption("Mantle Squad Live Dashboard • Powered by Apify")
